@@ -47,9 +47,12 @@ def list_all_chats():
         frame = driver.find_element(by=By.XPATH, value='//*[@id="__next"]/div[1]/div[2]/div/div/nav/div[3]/div')
         chats = frame.find_elements(by=By.TAG_NAME, value='a')
         ans = ""
+        cur = 1
         for chat in chats:
             target = chat.find_element(by=By.CLASS_NAME, value='flex-1')
-            ans += target.text + '\n'
+            ans += str(cur) + '. ' + target.text + '\n'
+            cur += 1
+        ans -= '\n'
         return ans
     except Exception:
         return "发生异常，找不到元素"
@@ -68,9 +71,11 @@ def find_answer() -> str:
 def send_to_chatGPT(prompt: str) -> str:
     try:
         driver.implicitly_wait(5)
-        text_box = driver.find_element(by=By.XPATH, value='//*[@id="__next"]/div[1]/div[1]/main/div[2]/form/div/div[2]/textarea')
+        text_box = driver.find_element(by=By.XPATH,
+                                       value='//*[@id="__next"]/div[1]/div[1]/main/div[2]/form/div/div[2]/textarea')
         text_box.send_keys(prompt)
-        submit_button = driver.find_element(by=By.XPATH, value='//*[@id="__next"]/div[1]/div[1]/main/div[2]/form/div/div[2]/button')
+        submit_button = driver.find_element(by=By.XPATH,
+                                            value='//*[@id="__next"]/div[1]/div[1]/main/div[2]/form/div/div[2]/button')
         submit_button.click()
     except Exception:
         return "发生未知异常"
@@ -86,14 +91,23 @@ def send_to_chatGPT(prompt: str) -> str:
         return "请求超时"
 
 
-def retry():
+def retry(change_text=None):
     try:
         driver.implicitly_wait(5)
         base = driver.find_elements(by=By.CLASS_NAME, value='text-base')[-2]
         edit = base.find_elements(by=By.TAG_NAME, value='button')[-1]
-        hover = ActionChains(driver).move_to_element(edit)
+        js = "var q=document.documentElement.scrollTop=10000"  # documentElement表示获取根节点元素
+        driver.execute_script(js)
+        hover = ActionChains(driver).move_to_element(base)
         hover.perform()
         edit.click()
+
+        # 修改内容
+        if change_text is not None:
+            text_frame = base.find_element(by=By.TAG_NAME, value='textarea')
+            text_frame.clear()
+            text_frame.send_keys(change_text)
+
         driver.implicitly_wait(5)
         submit_button = base.find_elements(by=By.TAG_NAME, value='button')[-2]
         submit_button.click()
@@ -129,24 +143,33 @@ app = Ariadne(
 # 私聊
 @app.broadcast.receiver("FriendMessage")
 async def friend_message_listener(app: Ariadne, friend: Friend, message: MessageChain):
+    text = message.display
     answer = ""
     # 刷新网页
-    if message.display == "!refresh":
+    if text == "!refresh":
         driver.refresh()
         answer = "网页已刷新"
     # 获取最后一条记录
-    elif message.display == "!last":
+    elif text == "!last":
         answer = driver.find_elements(by=By.CLASS_NAME, value='markdown')[-1].text
     # 列出所有对话
-    elif message.display == "!list":
+    elif text == "!list":
         answer = list_all_chats()
     # 新建会话
-    elif message.display == "!new chat":
+    elif text == "!new chat":
         answer = new_chat()
     # 重试
-    elif message.display == "!retry":
-        answer = retry()
+    elif text.find("!retry") == 0:
+        if "!retry" == text:
+            answer = retry()
+        else:
+            answer = retry(text[7:])
     # 向chatGPT发送消息
+    elif text.find("!loop") == 0:
+        l = text.split(" ")
+        for i in range(int(l[2])):
+            answer = send_to_chatGPT(l[1])
+            await app.send_message(friend, MessageChain([Plain(answer)]))
     else:
         answer = send_to_chatGPT(message.display)
     await app.send_message(friend, MessageChain([Plain(answer)]))
